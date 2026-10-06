@@ -1764,6 +1764,49 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
           // [start, end) and destroy a neighbour the occupancy guard never looked
           // at. Park past the last clip on the target track instead (guaranteed
           // empty), trim there, then slide into the span the guard verified.
+          // Park past the end of EVERY track, not just the destination. The park
+          // write drags in Premiere's auto-linked companion for the item at its full
+          // length, and the companion lands on whichever opposite-type track
+          // Premiere picks -- so parking beyond only the destination track could let
+          // that companion overwrite real audio (or video) elsewhere in the sequence.
+          var moveSeqTrackSets = [moveTrackClip.sequence.videoTracks, moveTrackClip.sequence.audioTracks];
+          for (var mts = 0; mts < moveSeqTrackSets.length; mts++) {
+            for (var mtk = 0; mtk < moveSeqTrackSets[mts].numTracks; mtk++) {
+              var moveScanTrack = moveSeqTrackSets[mts][mtk];
+              for (var mcl = 0; mcl < moveScanTrack.clips.numItems; mcl++) {
+                var moveScanEnd = valueOfTime(moveScanTrack.clips[mcl].end);
+                if (moveScanEnd > moveLastEnd) moveLastEnd = moveScanEnd;
+              }
+            }
+          }
+          // Snapshot the opposite-type tracks (audio for a video move, video for an
+          // audio move) so the companion Premiere auto-creates for the parked item
+          // can be told apart from clips that were already there.
+          var moveCompanionTracks = moveTrackClip.trackType === "video" ? moveTrackClip.sequence.audioTracks : moveTrackClip.sequence.videoTracks;
+          var moveCompanionBefore = [];
+          for (var cbt = 0; cbt < moveCompanionTracks.numTracks; cbt++) {
+            for (var cbc = 0; cbc < moveCompanionTracks[cbt].clips.numItems; cbc++) moveCompanionBefore.push(String(moveCompanionTracks[cbt].clips[cbc].nodeId));
+          }
+          var moveRemoveCompanions = function () {
+            // The park write is a bare item insert, so any new clip of the same
+            // item on the opposite-type tracks is Premiere's auto-linked companion,
+            // sitting at the park time. Dragging a linked clip to another video
+            // track in the UI leaves its audio where it was, so the companion is
+            // never wanted: lift it and leave the original in place.
+            var removedCompanions = 0;
+            for (var rct = 0; rct < moveCompanionTracks.numTracks; rct++) {
+              var rcTrack = moveCompanionTracks[rct];
+              for (var rcc = rcTrack.clips.numItems - 1; rcc >= 0; rcc--) {
+                var rcClip = rcTrack.clips[rcc];
+                var wasThere = false;
+                for (var rcb = 0; rcb < moveCompanionBefore.length; rcb++) { if (__idsMatch(rcClip.nodeId, moveCompanionBefore[rcb])) { wasThere = true; break; } }
+                if (wasThere) continue;
+                if (!rcClip.projectItem || !__idsMatch(rcClip.projectItem.nodeId, moveItem.nodeId)) continue;
+                try { rcClip.remove(false, false); removedCompanions++; } catch (eCompanion) {}
+              }
+            }
+            return removedCompanions;
+          };
           var moveParkTime = moveLastEnd + 1.0;
           var moveCleanupParked = function (parkedClip) {
             // Remove the parked copy so no failure path strands a full-length
@@ -1778,6 +1821,7 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
             }
           };
           destTrack.overwriteClip(moveItem, moveParkTime);
+          var moveCompanionsRemoved = moveRemoveCompanions();
           var placed = null;
           for (var pi = 0; pi < destTrack.clips.numItems; pi++) {
             var candidate = destTrack.clips[pi];
@@ -1827,7 +1871,7 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
           // Only now, with the copy verified at the destination, lift the original
           // (ripple = false), so the source track's other clips keep their timing.
           moveTrackClip.clip.remove(false, true);
-          return ok({ moved: true, trackIndex: moveTargetIndex, method: "park+trim+slide", start: moveStart, clipId: placed.nodeId, oldClipId: args.clipId || args.node_id || args.nodeId, trimRestored: true });
+          return ok({ moved: true, trackIndex: moveTargetIndex, method: "park+trim+slide", start: moveStart, clipId: placed.nodeId, oldClipId: args.clipId || args.node_id || args.nodeId, trimRestored: true, audioCompanionsRemoved: moveCompanionsRemoved });
 
         case "set_clip_speed_qe":
           if (!args.clipId && !args.node_id && !args.nodeId) return fail("set_clip_speed_qe requires clipId.");

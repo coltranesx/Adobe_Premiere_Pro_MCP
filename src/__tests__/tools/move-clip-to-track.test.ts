@@ -148,4 +148,43 @@ describe('move_clip_to_track fallback safety', () => {
     expect(block).toContain('occupants.push(other)');
     expect(block).toContain('occupants[ori].remove(false, true)');
   });
+  it('parks past the end of every track, not only the destination', async () => {
+    const block = await caseBlock();
+
+    // The park write brings Premiere's auto-linked companion along at the
+    // item's full length, on whichever opposite-type track Premiere picks.
+    // Parking past only the destination track let that companion overwrite
+    // real audio elsewhere in the sequence.
+    const sweep = block.indexOf('moveSeqTrackSets');
+    const park = block.indexOf('var moveParkTime = moveLastEnd + 1.0;');
+    expect(sweep).toBeGreaterThan(-1);
+    expect(park).toBeGreaterThan(sweep);
+    expect(block).toContain('moveTrackClip.sequence.videoTracks, moveTrackClip.sequence.audioTracks');
+  });
+
+  it('removes the auto-linked companion the park write creates', async () => {
+    const block = await caseBlock();
+
+    // Snapshot BEFORE the park, remove AFTER it and before the parked clip is
+    // looked up -- otherwise a stray out-of-sync audio clip is left at the
+    // park time (observed live: video moved 10s, audio left at 1s).
+    const snapshot = block.indexOf('var moveCompanionBefore = [];');
+    const park = block.indexOf('destTrack.overwriteClip(moveItem, moveParkTime);');
+    const removal = block.indexOf('var moveCompanionsRemoved = moveRemoveCompanions();');
+    const lookup = block.indexOf('var placed = null;');
+    expect(snapshot).toBeGreaterThan(-1);
+    expect(park).toBeGreaterThan(snapshot);
+    expect(removal).toBeGreaterThan(park);
+    expect(lookup).toBeGreaterThan(removal);
+
+    // Only clips that were not there before AND belong to the moved item are
+    // lifted: a pre-existing clip of the same media must survive.
+    expect(block).toContain('__idsMatch(rcClip.projectItem.nodeId, moveItem.nodeId)');
+    expect(block).toContain('if (wasThere) continue;');
+    expect(block).toContain('rcClip.remove(false, false)');
+
+    // And the caller can see it happened.
+    expect(block).toContain('audioCompanionsRemoved: moveCompanionsRemoved');
+  });
+
 });
