@@ -94,12 +94,12 @@ export const effectsTools: ToolModule[] = [
   },
   {
     name: 'add_keyframe',
-    description: 'Adds a keyframe to a clip component parameter at a specific time.',
+    description: 'Adds a keyframe to a clip component parameter at a specific time. `time` is in sequence/timeline seconds (same space as clip start/end), NOT the clip\'s source time; the tool converts internally.',
     inputSchema: z.object({
       clipId: z.string().describe('The ID of the clip'),
       componentName: z.string().describe('The display name of the component (e.g., "Motion", "Opacity")'),
       paramName: z.string().describe('The display name of the parameter (e.g., "Position", "Scale")'),
-      time: z.number().describe('The time in seconds for the keyframe'),
+      time: z.number().describe('The time in sequence-timeline seconds for the keyframe (between the clip start and end)'),
       value: z.union([z.number(), z.array(z.number())]).describe('The value to set at this keyframe. A number for Scale/Opacity/Rotation; [x,y] for Position.')
     }),
     run: (ctx, args) => addKeyframe(ctx, args.clipId, args.componentName, args.paramName, args.time, args.value),
@@ -111,13 +111,13 @@ export const effectsTools: ToolModule[] = [
       clipId: z.string().describe('The ID of the clip'),
       componentName: z.string().describe('The display name of the component'),
       paramName: z.string().describe('The display name of the parameter'),
-      time: z.number().describe('The time in seconds of the keyframe to remove')
+      time: z.number().describe('The time in sequence-timeline seconds of the keyframe to remove (same space as add_keyframe)')
     }),
     run: (ctx, args) => removeKeyframe(ctx, args.clipId, args.componentName, args.paramName, args.time),
   },
   {
     name: 'get_keyframes',
-    description: 'Gets all keyframes for a clip component parameter.',
+    description: 'Gets all keyframes for a clip component parameter. Returned keyframe times are in sequence-timeline seconds (same space as add_keyframe).',
     inputSchema: z.object({
       clipId: z.string().describe('The ID of the clip'),
       componentName: z.string().describe('The display name of the component'),
@@ -937,9 +937,10 @@ export async function addKeyframe(ctx: ToolContext, clipId: string, componentNam
         if (!resolved.ok) return JSON.stringify({ success: false, error: resolved.error, available: resolved.available });
         var param = resolved.property;
         var coerced = __coercePropertyValue(param, ${JSON.stringify(value)}, resolved.axis);
+        var clipTime = __seqTimeToClipTime(info.clip, ${time});
         param.setTimeVarying(true);
-        param.addKey(${time});
-        param.setValueAtKey(${time}, coerced, true);
+        param.addKey(clipTime);
+        param.setValueAtKey(clipTime, coerced, true);
         return JSON.stringify({
           success: true,
           message: "Keyframe added",
@@ -965,7 +966,7 @@ async function removeKeyframe(ctx: ToolContext, clipId: string, componentName: s
         var resolved = __resolveClipProperty(info.clip, ${JSON.stringify(componentName)}, ${JSON.stringify(paramName)});
         if (!resolved.ok) return JSON.stringify({ success: false, error: resolved.error, available: resolved.available });
         var param = resolved.property;
-        param.removeKey(${time});
+        param.removeKey(__seqTimeToClipTime(info.clip, ${time}));
         return JSON.stringify({
           success: true,
           message: "Keyframe removed",
@@ -995,11 +996,12 @@ async function getKeyframes(ctx: ToolContext, clipId: string, componentName: str
             staticValue: param.getValue()
           });
         }
-        var keys = param.getKeys();
+        var keys = param.getKeys() || [];
         var result = [];
         for (var k = 0; k < keys.length; k++) {
+          var seqSeconds = __clipTimeToSeqTime(info.clip, __ticksToSeconds(keys[k]));
           result.push({
-            time: keys[k],
+            time: { seconds: seqSeconds, ticks: __secondsToTicks(seqSeconds) },
             value: param.getValueAtKey(keys[k])
           });
         }

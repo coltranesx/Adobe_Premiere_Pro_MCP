@@ -474,4 +474,25 @@ describe('prelude QE helpers', () => {
       expect((sandbox.__result as { name: string }).name).toBe('Flou gaussien');
     });
   });
+  describe('keyframe time conversion', () => {
+    // Clip sits at 10s on the sequence and plays source time 3s..8s.
+    const clip = `{ start: { seconds: 10 }, inPoint: { seconds: 3 } }`;
+
+    it('maps sequence seconds into the clip source time base', async () => {
+      const sandbox = await runWithPrelude(`__result = __seqTimeToClipTime(${clip}, 12.5);`);
+      expect(sandbox.__result).toBeCloseTo(5.5);
+    });
+
+    it('maps the clip start to its inPoint', async () => {
+      const sandbox = await runWithPrelude(`__result = __seqTimeToClipTime(${clip}, 10);`);
+      expect(sandbox.__result).toBeCloseTo(3);
+    });
+
+    it('round-trips with __clipTimeToSeqTime', async () => {
+      const sandbox = await runWithPrelude(`
+        __result = __clipTimeToSeqTime(${clip}, __seqTimeToClipTime(${clip}, 13.25));
+      `);
+      expect(sandbox.__result).toBeCloseTo(13.25);
+    });
+  });
 });

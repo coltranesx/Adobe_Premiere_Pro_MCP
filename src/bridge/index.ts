@@ -680,6 +680,15 @@ function __ticksToSeconds(ticks) {
   if (!isFinite(parsed)) return 0;
   return Math.abs(parsed) >= 1000000 ? parsed / __TICKS_PER_SECOND : parsed;
 }
+// Component keyframe APIs (addKey/setValueAtKey/removeKey/getKeys) address time in
+// the clip's own source time base (the one inPoint/outPoint use), not sequence
+// position. Callers of the keyframe tools speak sequence seconds, so convert here.
+function __seqTimeToClipTime(clip, seqSeconds) {
+  return __ticksToSeconds(clip.inPoint) + (Number(seqSeconds) - __ticksToSeconds(clip.start));
+}
+function __clipTimeToSeqTime(clip, clipSeconds) {
+  return __ticksToSeconds(clip.start) + (Number(clipSeconds) - __ticksToSeconds(clip.inPoint));
+}
 function __coerceProjectItemId(value) {
   if (value == null) return "";
   if (typeof value === "object") {

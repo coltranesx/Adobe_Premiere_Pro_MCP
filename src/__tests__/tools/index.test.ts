@@ -1794,6 +1794,21 @@ describe('PremiereProTools', () => {
       expect(script).toContain('"scale"');
     });
 
+    it('converts sequence time to clip time for add_keyframe, remove_keyframe and get_keyframes', async () => {
+      mockBridge.executeScript.mockResolvedValue({ success: true });
+
+      await tools.executeTool('add_keyframe', { clipId: 'clip-1', componentName: 'Motion', paramName: 'Scale', time: 12.5, value: 120 });
+      await tools.executeTool('remove_keyframe', { clipId: 'clip-1', componentName: 'Motion', paramName: 'Scale', time: 12.5 });
+      await tools.executeTool('get_keyframes', { clipId: 'clip-1', componentName: 'Motion', paramName: 'Scale' });
+
+      const [addScript, removeScript, getScript] = mockBridge.executeScript.mock.calls.map(c => c[0] as string);
+      expect(addScript).toContain('__seqTimeToClipTime(info.clip, 12.5)');
+      expect(addScript).not.toContain('param.addKey(12.5)');
+      expect(removeScript).toContain('param.removeKey(__seqTimeToClipTime(info.clip, 12.5))');
+      expect(getScript).toContain('__clipTimeToSeqTime(info.clip');
+      expect(getScript).toContain('param.getKeys() || []');
+    });
+
     it('accepts a Position array as add_keyframe value', async () => {
       mockBridge.executeScript.mockResolvedValue({ success: true });
 
